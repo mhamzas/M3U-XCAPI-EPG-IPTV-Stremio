@@ -10,6 +10,7 @@ const fetch = require("node-fetch");
 const createAddon = require("./addon");
 const { encryptConfig, tryParseConfigToken } = require("./cryptoConfig");
 const LRUCache = require("./lruCache");
+const prescanCache = require("./prescanCache");
 
 const DEBUG = (process.env.DEBUG_MODE || "").toLowerCase() === "true";
 function dlog(...args) {
@@ -80,6 +81,31 @@ app.post("/encrypt", (req, res) => {
   } catch {
     res.status(400).json({ error: "Invalid config payload" });
   }
+});
+
+/**
+ * Prescan cache endpoint: browser uploads successfully fetched Xtream data
+ * so the server can use it when the IPTV provider blocks server IPs.
+ */
+app.post("/api/prescan-cache", express.json({ limit: "50mb" }), (req, res) => {
+  const { xtreamUrl, xtreamUsername, xtreamPassword, liveStreams, vodStreams, seriesStreams } = req.body || {};
+  if (!xtreamUrl || !xtreamUsername || !xtreamPassword) {
+    return res.status(400).json({ error: "Missing credentials" });
+  }
+  const key = prescanCache.makeKey(xtreamUrl, xtreamUsername, xtreamPassword);
+  prescanCache.set(key, {
+    liveStreams: liveStreams || [],
+    vodStreams: vodStreams || [],
+    seriesStreams: seriesStreams || null,
+    storedAt: Date.now(),
+  });
+  dlog("Prescan cache stored", {
+    key,
+    live: Array.isArray(liveStreams) ? liveStreams.length : 0,
+    vod: Array.isArray(vodStreams) ? vodStreams.length : 0,
+    series: Array.isArray(seriesStreams) ? seriesStreams.length : 0,
+  });
+  res.json({ ok: true });
 });
 
 /**

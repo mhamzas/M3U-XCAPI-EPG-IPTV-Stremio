@@ -311,6 +311,30 @@
         }
       }
 
+      // Upload prescan data to server so the addon build can use it
+      // (avoids 403 when the IPTV provider blocks the server's IP)
+      setProgress(40, "Caching data on server");
+      try {
+        const cacheResp = await fetch("/api/prescan-cache", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            xtreamUrl: baseUrl,
+            xtreamUsername: username,
+            xtreamPassword: password,
+            liveStreams: liveList,
+            vodStreams: vodList,
+          }),
+        });
+        if (cacheResp.ok) {
+          appendDetail("✔ Prescan data cached on server");
+        } else {
+          appendDetail("⚠ Prescan cache upload failed (non-critical)");
+        }
+      } catch (cacheErr) {
+        appendDetail("⚠ Prescan cache upload error: " + cacheErr.message + " (non-critical)");
+      }
+
       // EPG (non-fatal)
       if (enableEpgInitial) {
         const epgSourceUrl =

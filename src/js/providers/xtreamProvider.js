@@ -4,6 +4,8 @@
 // - fetchSeriesInfo lazily queries per-series episodes (get_series_info)
 // episodes are transformed into Stremio 'videos' (season/episode).
 const fetch = require("node-fetch");
+const crypto = require("crypto");
+const prescanCache = require("../../../prescanCache");
 
 async function fetchData(addonInstance) {
   const { config } = addonInstance;
@@ -18,6 +20,12 @@ async function fetchData(addonInstance) {
   if (!xtreamUrl || !xtreamUsername || !xtreamPassword) {
     throw new Error("Xtream credentials incomplete");
   }
+
+  // Preserve previous data in case the fetch fails (graceful degradation)
+  const prevChannels = addonInstance.channels || [];
+  const prevMovies = addonInstance.movies || [];
+  const prevSeries = addonInstance.series || [];
+  const prevEpg = addonInstance.epgData || {};
 
   addonInstance.channels = [];
   addonInstance.movies = [];
@@ -71,50 +79,73 @@ async function fetchData(addonInstance) {
     // JSON API mode
     const base = `${xtreamUrl}/player_api.php?username=${encodeURIComponent(xtreamUsername)}&password=${encodeURIComponent(xtreamPassword)}`;
     const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36" };
-    // Fetch streams + category lists in parallel to map category_id -> category_name
-    const [liveResp, vodResp, liveCatsResp, vodCatsResp] = await Promise.all([
-      fetch(`${base}&action=get_live_streams`, { timeout: 30000, headers }),
-      fetch(`${base}&action=get_vod_streams`, { timeout: 30000, headers }),
-      fetch(`${base}&action=get_live_categories`, { timeout: 20000, headers }).catch(
-        () => null,
-      ),
-      fetch(`${base}&action=get_vod_categories`, { timeout: 20000, headers }).catch(
-        () => null,
-      ),
-    ]);
+    const psCacheKey = prescanCache.makeKey(xtreamUrl, xtreamUsername, xtreamPassword);
 
-    if (!liveResp.ok) throw new Error("Xtream live streams fetch failed");
-    if (!vodResp.ok) throw new Error("Xtream VOD streams fetch failed");
-    const live = await liveResp.json();
-    const vod = await vodResp.json();
-
+    let live = [];
+    let vod = [];
     let liveCatMap = {};
     let vodCatMap = {};
+    let usedPrescanCache = false;
+
     try {
-      if (liveCatsResp && liveCatsResp.ok) {
-        const arr = await liveCatsResp.json();
-        if (Array.isArray(arr)) {
-          for (const c of arr) {
-            if (c && c.category_id && c.category_name)
-              liveCatMap[c.category_id] = c.category_name;
+      // Fetch streams + category lists in parallel to map category_id -> category_name
+      const [liveResp, vodResp, liveCatsResp, vodCatsResp] = await Promise.all([
+        fetch(`${base}&action=get_live_streams`, { timeout: 30000, headers }),
+        fetch(`${base}&action=get_vod_streams`, { timeout: 30000, headers }),
+        fetch(`${base}&action=get_live_categories`, { timeout: 20000, headers }).catch(
+          () => null,
+        ),
+        fetch(`${base}&action=get_vod_categories`, { timeout: 20000, headers }).catch(
+          () => null,
+        ),
+      ]);
+
+      if (!liveResp.ok) throw new Error(`Xtream live streams fetch failed (${liveResp.status})`);
+      if (!vodResp.ok) throw new Error(`Xtream VOD streams fetch failed (${vodResp.status})`);
+      live = await liveResp.json();
+      vod = await vodResp.json();
+
+      try {
+        if (liveCatsResp && liveCatsResp.ok) {
+          const arr = await liveCatsResp.json();
+          if (Array.isArray(arr)) {
+            for (const c of arr) {
+              if (c && c.category_id && c.category_name)
+                liveCatMap[c.category_id] = c.category_name;
+            }
           }
         }
-      }
-    } catch {
-      /* ignore */
-    }
-    try {
-      if (vodCatsResp && vodCatsResp.ok) {
-        const arr = await vodCatsResp.json();
-        if (Array.isArray(arr)) {
-          for (const c of arr) {
-            if (c && c.category_id && c.category_name)
-              vodCatMap[c.category_id] = c.category_name;
+      } catch { /* ignore */ }
+      try {
+        if (vodCatsResp && vodCatsResp.ok) {
+          const arr = await vodCatsResp.json();
+          if (Array.isArray(arr)) {
+            for (const c of arr) {
+              if (c && c.category_id && c.category_name)
+                vodCatMap[c.category_id] = c.category_name;
+            }
           }
         }
+      } catch { /* ignore */ }
+    } catch (fetchErr) {
+      // Direct API fetch failed — try prescan cache (browser-relayed data)
+      const cached = prescanCache.get(psCacheKey);
+      if (cached && (cached.liveStreams?.length || cached.vodStreams?.length)) {
+        console.log("[XTREAM] API fetch failed, using prescan cache fallback:", fetchErr.message);
+        live = cached.liveStreams || [];
+        vod = cached.vodStreams || [];
+        usedPrescanCache = true;
+      } else if (prevChannels.length || prevMovies.length) {
+        // Restore previous data if we had some
+        console.log("[XTREAM] API fetch failed, restoring previous data:", fetchErr.message);
+        addonInstance.channels = prevChannels;
+        addonInstance.movies = prevMovies;
+        addonInstance.series = prevSeries;
+        addonInstance.epgData = prevEpg;
+        return; // Exit without further processing
+      } else {
+        throw fetchErr; // No fallback available
       }
-    } catch {
-      /* ignore */
     }
 
     addonInstance.channels = (Array.isArray(live) ? live : []).map((s) => {
@@ -156,53 +187,84 @@ async function fetchData(addonInstance) {
     });
 
     if (config.includeSeries !== false) {
-      try {
-        const [seriesResp, seriesCatsResp] = await Promise.all([
-          fetch(`${base}&action=get_series`, { timeout: 35000, headers }),
-          fetch(`${base}&action=get_series_categories`, {
-            timeout: 20000,
-            headers,
-          }).catch(() => null),
-        ]);
-        let seriesCatMap = {};
+      let seriesData = null;
+      // If prescan cache had series data, use it directly
+      if (usedPrescanCache) {
+        const cached = prescanCache.get(psCacheKey);
+        if (cached && Array.isArray(cached.seriesStreams)) {
+          seriesData = cached.seriesStreams;
+        }
+      }
+      if (!seriesData) {
         try {
-          if (seriesCatsResp && seriesCatsResp.ok) {
-            const arr = await seriesCatsResp.json();
-            if (Array.isArray(arr)) {
-              for (const c of arr) {
-                if (c && c.category_id && c.category_name)
-                  seriesCatMap[c.category_id] = c.category_name;
+          const [seriesResp, seriesCatsResp] = await Promise.all([
+            fetch(`${base}&action=get_series`, { timeout: 35000, headers }),
+            fetch(`${base}&action=get_series_categories`, {
+              timeout: 20000,
+              headers,
+            }).catch(() => null),
+          ]);
+          let seriesCatMap = {};
+          try {
+            if (seriesCatsResp && seriesCatsResp.ok) {
+              const arr = await seriesCatsResp.json();
+              if (Array.isArray(arr)) {
+                for (const c of arr) {
+                  if (c && c.category_id && c.category_name)
+                    seriesCatMap[c.category_id] = c.category_name;
+                }
               }
             }
+          } catch {
+            /* ignore */
           }
-        } catch {
-          /* ignore */
-        }
-        if (seriesResp.ok) {
-          const seriesList = await seriesResp.json();
-          if (Array.isArray(seriesList)) {
-            addonInstance.series = seriesList.map((s) => {
-              const cat =
-                seriesCatMap[s.category_id] || s.category_name || "Series";
-              return {
-                id: `iptv_series_${s.series_id}`,
-                series_id: s.series_id,
-                name: s.name,
-                type: "series",
-                poster: s.cover,
-                plot: s.plot,
-                category: cat,
-                attributes: {
-                  "tvg-logo": s.cover,
-                  "group-title": cat,
+          if (seriesResp.ok) {
+            const seriesList = await seriesResp.json();
+            if (Array.isArray(seriesList)) {
+              addonInstance.series = seriesList.map((s) => {
+                const cat =
+                  seriesCatMap[s.category_id] || s.category_name || "Series";
+                return {
+                  id: `iptv_series_${s.series_id}`,
+                  series_id: s.series_id,
+                  name: s.name,
+                  type: "series",
+                  poster: s.cover,
                   plot: s.plot,
-                },
-              };
-            });
+                  category: cat,
+                  attributes: {
+                    "tvg-logo": s.cover,
+                    "group-title": cat,
+                    plot: s.plot,
+                  },
+                };
+              });
+            }
+          }
+        } catch (e) {
+          // Series fetch optional – check prescan cache
+          const cached = prescanCache.get(psCacheKey);
+          if (cached && Array.isArray(cached.seriesStreams)) {
+            seriesData = cached.seriesStreams;
           }
         }
-      } catch (e) {
-        // Series optional
+      }
+      // Apply pre-processed series data from prescan cache
+      if (seriesData && Array.isArray(seriesData)) {
+        addonInstance.series = seriesData.map((s) => ({
+          id: `iptv_series_${s.series_id}`,
+          series_id: s.series_id,
+          name: s.name,
+          type: "series",
+          poster: s.cover,
+          plot: s.plot,
+          category: s.category_name || "Series",
+          attributes: {
+            "tvg-logo": s.cover,
+            "group-title": s.category_name || "Series",
+            plot: s.plot,
+          },
+        }));
       }
     }
   }
