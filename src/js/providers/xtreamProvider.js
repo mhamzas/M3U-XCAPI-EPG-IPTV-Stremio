@@ -135,6 +135,19 @@ async function fetchData(addonInstance) {
         live = cached.liveStreams || [];
         vod = cached.vodStreams || [];
         usedPrescanCache = true;
+        // Rebuild category maps from cached data
+        if (Array.isArray(cached.liveCats)) {
+          for (const c of cached.liveCats) {
+            if (c && c.category_id && c.category_name)
+              liveCatMap[c.category_id] = c.category_name;
+          }
+        }
+        if (Array.isArray(cached.vodCats)) {
+          for (const c of cached.vodCats) {
+            if (c && c.category_id && c.category_name)
+              vodCatMap[c.category_id] = c.category_name;
+          }
+        }
       } else if (prevChannels.length || prevMovies.length) {
         // Restore previous data if we had some
         console.log("[XTREAM] API fetch failed, restoring previous data:", fetchErr.message);
@@ -191,8 +204,33 @@ async function fetchData(addonInstance) {
       // If prescan cache had series data, use it directly
       if (usedPrescanCache) {
         const cached = prescanCache.get(psCacheKey);
-        if (cached && Array.isArray(cached.seriesStreams)) {
-          seriesData = cached.seriesStreams;
+        if (cached && Array.isArray(cached.seriesStreams) && cached.seriesStreams.length) {
+          // Build series category map from cached data
+          let seriesCatMap = {};
+          if (Array.isArray(cached.seriesCats)) {
+            for (const c of cached.seriesCats) {
+              if (c && c.category_id && c.category_name)
+                seriesCatMap[c.category_id] = c.category_name;
+            }
+          }
+          addonInstance.series = cached.seriesStreams.map((s) => {
+            const cat = seriesCatMap[s.category_id] || s.category_name || "Series";
+            return {
+              id: `iptv_series_${s.series_id}`,
+              series_id: s.series_id,
+              name: s.name,
+              type: "series",
+              poster: s.cover,
+              plot: s.plot,
+              category: cat,
+              attributes: {
+                "tvg-logo": s.cover,
+                "group-title": cat,
+                plot: s.plot,
+              },
+            };
+          });
+          seriesData = "done"; // Mark as handled
         }
       }
       if (!seriesData) {
@@ -244,27 +282,34 @@ async function fetchData(addonInstance) {
         } catch (e) {
           // Series fetch optional – check prescan cache
           const cached = prescanCache.get(psCacheKey);
-          if (cached && Array.isArray(cached.seriesStreams)) {
-            seriesData = cached.seriesStreams;
+          if (cached && Array.isArray(cached.seriesStreams) && cached.seriesStreams.length) {
+            let seriesCatMap = {};
+            if (Array.isArray(cached.seriesCats)) {
+              for (const c of cached.seriesCats) {
+                if (c && c.category_id && c.category_name)
+                  seriesCatMap[c.category_id] = c.category_name;
+              }
+            }
+            addonInstance.series = cached.seriesStreams.map((s) => {
+              const cat = seriesCatMap[s.category_id] || s.category_name || "Series";
+              return {
+                id: `iptv_series_${s.series_id}`,
+                series_id: s.series_id,
+                name: s.name,
+                type: "series",
+                poster: s.cover,
+                plot: s.plot,
+                category: cat,
+                attributes: {
+                  "tvg-logo": s.cover,
+                  "group-title": cat,
+                  plot: s.plot,
+                },
+              };
+            });
+            seriesData = "done";
           }
         }
-      }
-      // Apply pre-processed series data from prescan cache
-      if (seriesData && Array.isArray(seriesData)) {
-        addonInstance.series = seriesData.map((s) => ({
-          id: `iptv_series_${s.series_id}`,
-          series_id: s.series_id,
-          name: s.name,
-          type: "series",
-          poster: s.cover,
-          plot: s.plot,
-          category: s.category_name || "Series",
-          attributes: {
-            "tvg-logo": s.cover,
-            "group-title": s.category_name || "Series",
-            plot: s.plot,
-          },
-        }));
       }
     }
   }

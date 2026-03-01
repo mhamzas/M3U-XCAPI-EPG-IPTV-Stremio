@@ -298,18 +298,59 @@
       vodCount = Array.isArray(vodList) ? vodList.length : 0;
       appendDetail(`✔ VOD streams: ${vodCount.toLocaleString()}`);
 
+      // Fetch categories so the server can map category_id -> category_name
+      setProgress(34, "Fetching categories");
+      let liveCats = [];
+      let vodCats = [];
+      try {
+        const lcText = await robustFetch(`${base}&action=get_live_categories`, "live_categories", true);
+        liveCats = JSON.parse(lcText);
+      } catch (e) { appendDetail(`⚠ Live categories fetch: ${e.message} (non-critical)`); }
+      try {
+        const vcText = await robustFetch(`${base}&action=get_vod_categories`, "vod_categories", true);
+        vodCats = JSON.parse(vcText);
+      } catch (e) { appendDetail(`⚠ VOD categories fetch: ${e.message} (non-critical)`); }
+
+      // Build human-readable category set for prescan stats
+      const liveCatMap = {};
+      if (Array.isArray(liveCats)) {
+        for (const c of liveCats) {
+          if (c && c.category_id && c.category_name) liveCatMap[c.category_id] = c.category_name;
+        }
+      }
+      const vodCatMap = {};
+      if (Array.isArray(vodCats)) {
+        for (const c of vodCats) {
+          if (c && c.category_id && c.category_name) vodCatMap[c.category_id] = c.category_name;
+        }
+      }
+
       if (Array.isArray(liveList)) {
         for (const l of liveList) {
-          const c = l.category_name || l.category || "";
+          const c = liveCatMap[l.category_id] || l.category_name || l.category || "";
           if (c) categories.add(c);
         }
       }
       if (Array.isArray(vodList)) {
         for (const v of vodList) {
-          const c = v.category_name || v.category || "";
+          const c = vodCatMap[v.category_id] || v.category_name || v.category || "";
           if (c) categories.add(c);
         }
       }
+
+      // Fetch series list
+      setProgress(37, "Fetching series");
+      let seriesList = [];
+      let seriesCats = [];
+      try {
+        const sText = await robustFetch(`${base}&action=get_series`, "series", true);
+        seriesList = JSON.parse(sText);
+        appendDetail(`✔ Series: ${Array.isArray(seriesList) ? seriesList.length.toLocaleString() : 0}`);
+      } catch (e) { appendDetail(`⚠ Series fetch: ${e.message} (non-critical)`); }
+      try {
+        const scText = await robustFetch(`${base}&action=get_series_categories`, "series_categories", true);
+        seriesCats = JSON.parse(scText);
+      } catch (e) { /* ignore */ }
 
       // Upload prescan data to server so the addon build can use it
       // (avoids 403 when the IPTV provider blocks the server's IP)
@@ -324,6 +365,10 @@
             xtreamPassword: password,
             liveStreams: liveList,
             vodStreams: vodList,
+            liveCats: liveCats,
+            vodCats: vodCats,
+            seriesStreams: seriesList,
+            seriesCats: seriesCats,
           }),
         });
         if (cacheResp.ok) {

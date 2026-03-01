@@ -69,7 +69,7 @@ app.use((req, res, next) => {
  * MUST be defined BEFORE the global express.json() body parser (512kb limit).
  */
 app.post("/api/prescan-cache", express.json({ limit: "50mb" }), (req, res) => {
-  const { xtreamUrl, xtreamUsername, xtreamPassword, liveStreams, vodStreams, seriesStreams } = req.body || {};
+  const { xtreamUrl, xtreamUsername, xtreamPassword, liveStreams, vodStreams, liveCats, vodCats, seriesStreams, seriesCats } = req.body || {};
   if (!xtreamUrl || !xtreamUsername || !xtreamPassword) {
     return res.status(400).json({ error: "Missing credentials" });
   }
@@ -77,13 +77,18 @@ app.post("/api/prescan-cache", express.json({ limit: "50mb" }), (req, res) => {
   prescanCache.set(key, {
     liveStreams: liveStreams || [],
     vodStreams: vodStreams || [],
+    liveCats: liveCats || [],
+    vodCats: vodCats || [],
     seriesStreams: seriesStreams || null,
+    seriesCats: seriesCats || [],
     storedAt: Date.now(),
   });
   dlog("Prescan cache stored", {
     key,
     live: Array.isArray(liveStreams) ? liveStreams.length : 0,
     vod: Array.isArray(vodStreams) ? vodStreams.length : 0,
+    liveCats: Array.isArray(liveCats) ? liveCats.length : 0,
+    vodCats: Array.isArray(vodCats) ? vodCats.length : 0,
     series: Array.isArray(seriesStreams) ? seriesStreams.length : 0,
   });
   res.json({ ok: true });
