@@ -618,13 +618,6 @@ async function createAddon(config) {
         resources: ["catalog", "stream", "meta"],
         types: ["movie"],
         catalogs: [
-         /*   {
-                type: 'tv',
-                id: 'iptv_channels',
-                name: 'IPTV Channels',
-                extra: [{ name: 'genre' }, { name: 'search' }, { name: 'skip' }],
-                genres: []
-            },*/
             {
                 type: 'movie',
                 id: 'iptv_movies',
@@ -632,13 +625,6 @@ async function createAddon(config) {
                 extra: [{ name: 'genre' }, { name: 'search' }, { name: 'skip' }],
                 genres: []
             }
-            /*{
-                type: 'series',
-                id: 'iptv_series',
-                name: 'IPTV Series',
-                extra: [{ name: 'genre' }, { name: 'search' }, { name: 'skip' }],
-                genres: []
-            }*/
         ],
         idPrefixes: ["iptv_"],
         behaviorHints: {
@@ -646,6 +632,7 @@ async function createAddon(config) {
             configurationRequired: false
         }
     };
+
 
     config.instanceId = config.instanceId ||
         (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex'));
@@ -682,7 +669,6 @@ async function createAddon(config) {
             _savedGenres[cat.id] = cat.genres || [];
             cat.genres = [];
         }
-        // Pass the fully populated manifest to builder
         // IMPORTANT: We must ensure 'manifest' object has 'catalogs[].genres' populated BEFORE creating builder
         const builder = new addonBuilder(manifest); 
 
