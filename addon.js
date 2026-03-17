@@ -617,8 +617,8 @@ async function createAddon(config) {
         description: "IPTV addon (M3U / EPG / Xtream) with encrypted configs, caching & series support (Xtream + Direct)",
         resources: ["catalog", "stream", "meta"],
         types: ["movie"],
-        /*catalogs: [
-            {
+        catalogs: [
+         /*   {
                 type: 'tv',
                 id: 'iptv_channels',
                 name: 'IPTV Channels',
@@ -631,7 +631,7 @@ async function createAddon(config) {
                 name: 'IPTV Movies',
                 extra: [{ name: 'genre' }, { name: 'search' }, { name: 'skip' }],
                 genres: []
-            },
+            }
             /*{
                 type: 'series',
                 id: 'iptv_series',
@@ -675,7 +675,13 @@ async function createAddon(config) {
             console.error('[ADDON] Initial update failed:', e);
         }
         addonInstance.buildGenresInManifest();
-        
+
+        // Clear genres before builder to stay under 8kb manifest limit
+        const _savedGenres = {};
+        for (const cat of manifest.catalogs) {
+            _savedGenres[cat.id] = cat.genres || [];
+            cat.genres = [];
+        }
         // Pass the fully populated manifest to builder
         // IMPORTANT: We must ensure 'manifest' object has 'catalogs[].genres' populated BEFORE creating builder
         const builder = new addonBuilder(manifest); 
@@ -810,13 +816,25 @@ async function createAddon(config) {
         // the large options arrays during build. The manifest object is shared by
         // reference, so mutating it here affects the iface.manifest served by our
         // custom manifest.json route in server.js.
-        for (const catalog of manifest.catalogs) {
+        /*for (const catalog of manifest.catalogs) {
             if (Array.isArray(catalog.genres) && catalog.genres.length > 0) {
                 if (Array.isArray(catalog.extra)) {
                     const genreExtra = catalog.extra.find(e => e.name === 'genre');
                     if (genreExtra) {
                         genreExtra.options = [...catalog.genres];
                     }
+                }
+            }
+        }
+
+        return iface;*/
+        // Restore genres into options post-build
+        for (const catalog of manifest.catalogs) {
+            if (_savedGenres[catalog.id]) {
+                catalog.genres = _savedGenres[catalog.id];
+                if (Array.isArray(catalog.extra)) {
+                    const genreExtra = catalog.extra.find(e => e.name === 'genre');
+                    if (genreExtra) genreExtra.options = [...catalog.genres];
                 }
             }
         }
