@@ -161,17 +161,19 @@ class M3UEPGAddon {
 
     buildGenresInManifest() {
         if (!this.manifestRef) return;
-        const tvCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_channels');
+        const MAX_GENRES = parseInt(process.env.MAX_GENRES || '100', 10);
+        //const tvCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_channels');
         const movieCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_movies');
-        const seriesCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_series');
+        //const seriesCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_series');
 
         // Helper: set catalog.genres (options are added post-build to avoid SDK linter size limits)
         function setGenresOnCatalog(catalog, groups) {
             if (!catalog) return;
-            catalog.genres = groups;
+           //catalog.genres = groups;
+            catalog.genres = groups.slice(0, MAX_GENRES);
         }
 
-        if (tvCatalog) {
+        /*if (tvCatalog) {
             const groups = [
                 ...new Set(
                     this.channels
@@ -182,7 +184,7 @@ class M3UEPGAddon {
             ].sort((a, b) => a.localeCompare(b));
             if (!groups.includes('All Channels')) groups.unshift('All Channels');
             setGenresOnCatalog(tvCatalog, groups);
-        }
+        }*/
 
         if (movieCatalog) {
             const movieGroups = [
@@ -196,7 +198,7 @@ class M3UEPGAddon {
             setGenresOnCatalog(movieCatalog, movieGroups);
         }
 
-        if (seriesCatalog) {
+        /*if (seriesCatalog) {
             const seriesGroups = [
                 ...new Set(
                     this.series
@@ -206,12 +208,10 @@ class M3UEPGAddon {
                 )
             ].sort((a, b) => a.localeCompare(b));
             setGenresOnCatalog(seriesCatalog, seriesGroups);
-        }
+        }*/
 
         this.log.debug('Catalog genres built', {
-            tvGenres: tvCatalog?.genres?.length || 0,
-            movieGenres: movieCatalog?.genres?.length || 0,
-            seriesGenres: seriesCatalog?.genres?.length || 0
+            movieGenres: movieCatalog?.genres?.length || 0
         });
     }
 
@@ -616,7 +616,7 @@ async function createAddon(config) {
         name: ADDON_NAME,
         description: "IPTV addon (M3U / EPG / Xtream) with encrypted configs, caching & series support (Xtream + Direct)",
         resources: ["catalog", "stream", "meta"],
-        types: ["tv", "movie", "series"],
+        types: ["movie"],
         /*catalogs: [
             {
                 type: 'tv',
