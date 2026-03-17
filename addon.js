@@ -161,19 +161,17 @@ class M3UEPGAddon {
 
     buildGenresInManifest() {
         if (!this.manifestRef) return;
-        const MAX_GENRES = parseInt(process.env.MAX_GENRES || '100', 10);
-        //const tvCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_channels');
+        const tvCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_channels');
         const movieCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_movies');
-        //const seriesCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_series');
+        const seriesCatalog = this.manifestRef.catalogs.find(c => c.id === 'iptv_series');
 
         // Helper: set catalog.genres (options are added post-build to avoid SDK linter size limits)
         function setGenresOnCatalog(catalog, groups) {
             if (!catalog) return;
-           //catalog.genres = groups;
-            catalog.genres = groups.slice(0, MAX_GENRES);
+            catalog.genres = groups;
         }
 
-        /*if (tvCatalog) {
+        if (tvCatalog) {
             const groups = [
                 ...new Set(
                     this.channels
@@ -184,7 +182,7 @@ class M3UEPGAddon {
             ].sort((a, b) => a.localeCompare(b));
             if (!groups.includes('All Channels')) groups.unshift('All Channels');
             setGenresOnCatalog(tvCatalog, groups);
-        }*/
+        }
 
         if (movieCatalog) {
             const movieGroups = [
@@ -198,7 +196,7 @@ class M3UEPGAddon {
             setGenresOnCatalog(movieCatalog, movieGroups);
         }
 
-        /*if (seriesCatalog) {
+        if (seriesCatalog) {
             const seriesGroups = [
                 ...new Set(
                     this.series
@@ -208,10 +206,12 @@ class M3UEPGAddon {
                 )
             ].sort((a, b) => a.localeCompare(b));
             setGenresOnCatalog(seriesCatalog, seriesGroups);
-        }*/
+        }
 
         this.log.debug('Catalog genres built', {
-            movieGenres: movieCatalog?.genres?.length || 0
+            tvGenres: tvCatalog?.genres?.length || 0,
+            movieGenres: movieCatalog?.genres?.length || 0,
+            seriesGenres: seriesCatalog?.genres?.length || 0
         });
     }
 
@@ -633,7 +633,6 @@ async function createAddon(config) {
         }
     };
 
-
     config.instanceId = config.instanceId ||
         (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex'));
 
@@ -662,13 +661,8 @@ async function createAddon(config) {
             console.error('[ADDON] Initial update failed:', e);
         }
         addonInstance.buildGenresInManifest();
-
-        // Clear genres before builder to stay under 8kb manifest limit
-        const _savedGenres = {};
-        for (const cat of manifest.catalogs) {
-            _savedGenres[cat.id] = cat.genres || [];
-            cat.genres = [];
-        }
+        
+        // Pass the fully populated manifest to builder
         // IMPORTANT: We must ensure 'manifest' object has 'catalogs[].genres' populated BEFORE creating builder
         const builder = new addonBuilder(manifest); 
 
@@ -802,25 +796,13 @@ async function createAddon(config) {
         // the large options arrays during build. The manifest object is shared by
         // reference, so mutating it here affects the iface.manifest served by our
         // custom manifest.json route in server.js.
-        /*for (const catalog of manifest.catalogs) {
+        for (const catalog of manifest.catalogs) {
             if (Array.isArray(catalog.genres) && catalog.genres.length > 0) {
                 if (Array.isArray(catalog.extra)) {
                     const genreExtra = catalog.extra.find(e => e.name === 'genre');
                     if (genreExtra) {
                         genreExtra.options = [...catalog.genres];
                     }
-                }
-            }
-        }
-
-        return iface;*/
-        // Restore genres into options post-build
-        for (const catalog of manifest.catalogs) {
-            if (_savedGenres[catalog.id]) {
-                catalog.genres = _savedGenres[catalog.id];
-                if (Array.isArray(catalog.extra)) {
-                    const genreExtra = catalog.extra.find(e => e.name === 'genre');
-                    if (genreExtra) genreExtra.options = [...catalog.genres];
                 }
             }
         }
